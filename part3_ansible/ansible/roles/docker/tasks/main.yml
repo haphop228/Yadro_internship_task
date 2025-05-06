@@ -1,0 +1,86 @@
+- name: Install required system packages
+  apt:
+    name: "{{ item }}"
+    state: present
+    update_cache: yes
+  loop:
+    - apt-transport-https
+    - ca-certificates
+    - curl
+    - software-properties-common
+    - python3-pip
+
+- name: Add Docker GPG key
+  apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+
+- name: Add Docker repository
+  apt_repository:
+    repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu jammy stable"
+    state: present
+
+- name: Install Docker
+  apt:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - docker-ce
+    - docker-ce-cli
+    - containerd.io
+
+- name: Add current user to docker group
+  user:
+    name: "{{ lookup('env', 'USER') }}"
+    groups: docker
+    append: yes
+
+- name: Ensure Docker is running and enabled
+  service:
+    name: docker
+    state: started
+    enabled: yes
+
+- name: Copy files to /tmp
+  copy:
+    src: "{{ item.src }}"
+    dest: "/tmp/{{ item.dest }}"
+    mode: '0644'
+  with_items:
+    - { src: 'files/Dockerfile', dest: 'Dockerfile' }
+    - { src: 'files/http_requests.py', dest: 'http_requests.py' }
+  become: yes
+
+- name: Copy http_requests.py
+  copy:
+    src: files/http_requests.py
+    dest: /tmp/http_requests.py
+    mode: '0755'
+
+- name: Build Docker image
+  community.docker.docker_image:
+    name: http-requests-script
+    build:
+      path: /tmp
+      dockerfile: /tmp/Dockerfile
+    source: build
+    force_source: yes
+  become: yes
+
+
+- name: Run container
+  community.docker.docker_container:
+    name: http-requests-container
+    image: http-requests-script
+    state: started
+    restart: yes
+    detach: yes
+
+- name: Get full container logs with timestamps
+  command: docker logs --timestamps --tail=all http-requests-container
+  register: full_container_logs
+  changed_when: false
+
+- name: Display full logs
+  debug:
+    var: full_container_logs.stdout
